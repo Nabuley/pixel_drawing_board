@@ -4,16 +4,63 @@
 <meta charset="UTF-8">
 <title>Pixel Art URL Saver</title>
 <style>
-    body { background: #eee; display: flex; flex-direction: column; align-items: center; }
+    /* ====== 전체 배경에 흐르는 그라데이션 ====== */
+    body {
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+
+        background: linear-gradient(120deg,
+            #ff9a9e,
+            #fad0c4,
+            #fbc2eb,
+            #a1c4fd,
+            #c2e9fb
+        );
+        background-size: 400% 400%;
+        animation: flowGradient 12s ease infinite;
+    }
+
+    @keyframes flowGradient {
+        0%   { background-position: 0% 50%; }
+        50%  { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+
     canvas {
         border: 1px solid #333;
         image-rendering: pixelated;
-        margin-bottom: 12px;
+        margin-top: 20px;
+        background: white;
     }
+
+    /* UI 박스는 투명한 흰 배경으로 */
+    .ui-box {
+        margin-top: 20px;
+        padding: 18px 25px;
+        border-radius: 15px;
+        display: flex;
+        gap: 10px;
+
+        background: rgba(255,255,255,0.4);
+        backdrop-filter: blur(5px);
+    }
+
     button {
-        margin: 5px;
         padding: 8px 15px;
         cursor: pointer;
+        border: none;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.85);
+        font-size: 14px;
+    }
+
+    button:hover {
+        background: rgba(255,255,255,1);
     }
 </style>
 </head>
@@ -23,10 +70,13 @@
 
 <canvas id="canvas" width="400" height="400"></canvas>
 
-<div>
+<div class="ui-box">
     <button id="penBtn">펜 모드</button>
     <button id="eraseBtn">지우개 모드</button>
+    <button id="undoBtn">Undo</button>
+    <button id="redoBtn">Redo</button>
     <button id="clearBtn">전체 지우기</button>
+    <button id="savePngBtn">PNG 저장</button>
     <button id="copyBtn">URL 복사</button>
 </div>
 
@@ -34,10 +84,15 @@
 // ======== 설정 ========
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-const PIXEL = 10; // 10x10 픽셀
-let points = [];  // {x, y}
+const PIXEL = 10;
+
+let points = [];
 let isDrawing = false;
-let mode = "pen"; // pen / erase
+let mode = "pen";
+
+// Undo / Redo 스택
+let undoStack = [];
+let redoStack = [];
 
 // ======== 기본 배경 ========
 function clearCanvas() {
@@ -57,29 +112,55 @@ function render() {
     points.forEach(p => drawPixel(p.x, p.y));
 }
 
-// ======== 마우스 위치 ========
-function getMousePos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / PIXEL);
-    const y = Math.floor((e.clientY - rect.top) / PIXEL);
-    return {x, y};
+// ======== Undo 저장 ========
+function pushUndo() {
+    undoStack.push(JSON.stringify(points));
+    redoStack = [];
 }
 
-// ======== 펜 모드: 점 추가 ========
+// ======== Undo ========
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(JSON.stringify(points));
+    points = JSON.parse(undoStack.pop());
+    render();
+}
+
+// ======== Redo ========
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(JSON.stringify(points));
+    points = JSON.parse(redoStack.pop());
+    render();
+}
+
+// ======== 좌표 계산 ========
+function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: Math.floor((e.clientX - rect.left) / PIXEL),
+        y: Math.floor((e.clientY - rect.top) / PIXEL)
+    };
+}
+
+// ======== 펜 ========
 function addPoint(pos) {
     points.push(pos);
     drawPixel(pos.x, pos.y);
 }
 
-// ======== 지우개 모드: 점 삭제 ========
+// ======== 지우개 ========
 function erasePoint(pos) {
+    let before = points.length;
     points = points.filter(p => !(p.x === pos.x && p.y === pos.y));
-    render();
+    if (points.length !== before) render();
 }
 
-// ======== 그리기 이벤트 ========
+// ======== 이벤트 ========
 canvas.addEventListener("mousedown", (e) => {
     isDrawing = true;
+    pushUndo();
+
     const pos = getMousePos(e);
     if (mode === "pen") addPoint(pos);
     else erasePoint(pos);
@@ -99,6 +180,7 @@ canvas.addEventListener("mouseleave", () => isDrawing = false);
 function saveToUrl() {
     const raw = points.map(p => `${p.x},${p.y}`).join(";");
     const base64 = btoa(raw);
+
     const newUrl = new URL(window.location.href);
     newUrl.searchParams.set("d", base64);
     window.history.replaceState({}, "", newUrl.toString());
@@ -113,10 +195,12 @@ function loadFromUrl() {
     try {
         const decoded = atob(data);
         const pairs = decoded.split(";");
+
         points = pairs.map(pair => {
             const [x, y] = pair.split(",").map(n => parseInt(n));
             return {x, y};
         });
+
         render();
     } catch (e) {
         console.error("URL 로드 실패:", e);
@@ -124,24 +208,32 @@ function loadFromUrl() {
 }
 loadFromUrl();
 
-// ======== 버튼 기능 ========
+// ======== PNG 저장 ========
+function savePng() {
+    const link = document.createElement("a");
+    link.download = "pixel_art.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+}
+
+// ======== 버튼 ========
+document.getElementById("penBtn").addEventListener("click", () => mode = "pen");
+document.getElementById("eraseBtn").addEventListener("click", () => mode = "erase");
+document.getElementById("undoBtn").addEventListener("click", undo);
+document.getElementById("redoBtn").addEventListener("click", redo);
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+    pushUndo();
+    points = [];
+    render();
+});
+
+document.getElementById("savePngBtn").addEventListener("click", savePng);
+
 document.getElementById("copyBtn").addEventListener("click", () => {
     saveToUrl();
     navigator.clipboard.writeText(window.location.href)
         .then(() => alert("URL 복사됨!"));
-});
-
-document.getElementById("penBtn").addEventListener("click", () => {
-    mode = "pen";
-});
-
-document.getElementById("eraseBtn").addEventListener("click", () => {
-    mode = "erase";
-});
-
-document.getElementById("clearBtn").addEventListener("click", () => {
-    points = [];
-    render();
 });
 </script>
 </body>
