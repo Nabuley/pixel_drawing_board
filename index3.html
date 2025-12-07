@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Pixel Art URL Saver</title>
+<style>
+    body { background: #eee; display: flex; flex-direction: column; align-items: center; }
+    canvas {
+        border: 1px solid #333;
+        image-rendering: pixelated;
+        margin-bottom: 12px;
+    }
+    button {
+        margin: 5px;
+        padding: 8px 15px;
+        cursor: pointer;
+    }
+</style>
+</head>
+<body>
+
+<h2>픽셀아트 URL 저장 (좌표 기반)</h2>
+
+<canvas id="canvas" width="400" height="400"></canvas>
+
+<div>
+    <button id="penBtn">펜 모드</button>
+    <button id="eraseBtn">지우개 모드</button>
+    <button id="clearBtn">전체 지우기</button>
+    <button id="copyBtn">URL 복사</button>
+</div>
+
+<script>
+// ======== 설정 ========
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const PIXEL = 10; // 10x10 픽셀
+let points = [];  // {x, y}
+let isDrawing = false;
+let mode = "pen"; // pen / erase
+
+// ======== 기본 배경 ========
+function clearCanvas() {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ======== 점 그리기 ========
+function drawPixel(x, y) {
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x * PIXEL, y * PIXEL, PIXEL, PIXEL);
+}
+
+// ======== 전체 렌더링 ========
+function render() {
+    clearCanvas();
+    points.forEach(p => drawPixel(p.x, p.y));
+}
+
+// ======== 마우스 위치 ========
+function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / PIXEL);
+    const y = Math.floor((e.clientY - rect.top) / PIXEL);
+    return {x, y};
+}
+
+// ======== 펜 모드: 점 추가 ========
+function addPoint(pos) {
+    points.push(pos);
+    drawPixel(pos.x, pos.y);
+}
+
+// ======== 지우개 모드: 점 삭제 ========
+function erasePoint(pos) {
+    points = points.filter(p => !(p.x === pos.x && p.y === pos.y));
+    render();
+}
+
+// ======== 그리기 이벤트 ========
+canvas.addEventListener("mousedown", (e) => {
+    isDrawing = true;
+    const pos = getMousePos(e);
+    if (mode === "pen") addPoint(pos);
+    else erasePoint(pos);
+});
+
+canvas.addEventListener("mousemove", (e) => {
+    if (!isDrawing) return;
+    const pos = getMousePos(e);
+    if (mode === "pen") addPoint(pos);
+    else erasePoint(pos);
+});
+
+canvas.addEventListener("mouseup", () => isDrawing = false);
+canvas.addEventListener("mouseleave", () => isDrawing = false);
+
+// ======== URL 저장 ========
+function saveToUrl() {
+    const raw = points.map(p => `${p.x},${p.y}`).join(";");
+    const base64 = btoa(raw);
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.set("d", base64);
+    window.history.replaceState({}, "", newUrl.toString());
+}
+
+// ======== URL 불러오기 ========
+function loadFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const data = params.get("d");
+    if (!data) return;
+
+    try {
+        const decoded = atob(data);
+        const pairs = decoded.split(";");
+        points = pairs.map(pair => {
+            const [x, y] = pair.split(",").map(n => parseInt(n));
+            return {x, y};
+        });
+        render();
+    } catch (e) {
+        console.error("URL 로드 실패:", e);
+    }
+}
+loadFromUrl();
+
+// ======== 버튼 기능 ========
+document.getElementById("copyBtn").addEventListener("click", () => {
+    saveToUrl();
+    navigator.clipboard.writeText(window.location.href)
+        .then(() => alert("URL 복사됨!"));
+});
+
+document.getElementById("penBtn").addEventListener("click", () => {
+    mode = "pen";
+});
+
+document.getElementById("eraseBtn").addEventListener("click", () => {
+    mode = "erase";
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+    points = [];
+    render();
+});
+</script>
+</body>
+</html>
